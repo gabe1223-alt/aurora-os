@@ -1,0 +1,12 @@
+#!/bin/sh
+kwin_x11 >/dev/null 2>&1 &
+KW=$!
+sleep 1
+n=0
+while [ "$n" -lt 5 ]; do
+    /usr/bin/aurora-firstboot-wizard && break
+    n=$((n + 1))
+    sleep 2
+done
+kill "$KW" 2>/dev/null
+exit 0

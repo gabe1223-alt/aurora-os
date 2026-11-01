@@ -1,0 +1,2 @@
+lightdm shared/default-x-display-manager select lightdm
+unattended-upgrades unattended-upgrades/enable_auto_updates boolean true

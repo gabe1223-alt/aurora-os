@@ -1,0 +1,12 @@
+{
+  "KPlugin": {
+    "Authors": [{ "Name": "Aurora OS" }],
+    "Id": "org.aurora.light",
+    "Name": "Aurora Light",
+    "Description": "Aurora Light global theme for Aurora OS",
+    "License": "GPL-3.0+",
+    "Version": "1.0",
+    "Website": ""
+  },
+  "KPackageStructure": "Plasma/LookAndFeel"
+}

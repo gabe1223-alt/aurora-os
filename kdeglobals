@@ -1,0 +1,11 @@
+[General]
+BrowserApplication=firefox-esr.desktop
+ColorScheme=BreezeDark
+
+[Icons]
+Theme=breeze-dark
+
+[KDE]
+LookAndFeelPackage=org.aurora.dark
+AnimationDurationFactor=0.5
+widgetStyle=Breeze

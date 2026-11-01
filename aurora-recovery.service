@@ -1,0 +1,16 @@
+[Unit]
+Description=Aurora recovery menu on tty1
+After=basic.target systemd-user-sessions.service
+Conflicts=getty@tty1.service display-manager.service
+
+[Service]
+Type=idle
+Environment=TERM=linux
+ExecStart=/usr/lib/aurora/recovery-menu
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=always

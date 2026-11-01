@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Home
+Icon=user-home
+Exec=sh -c 'exec dolphin "$HOME"'
+Terminal=false

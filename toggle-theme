@@ -1,0 +1,7 @@
+#!/bin/sh
+cur="$(kreadconfig6 --group KDE --key LookAndFeelPackage 2>/dev/null)"
+if [ "$cur" = "org.aurora.dark" ]; then
+    plasma-apply-lookandfeel -a org.aurora.light
+else
+    plasma-apply-lookandfeel -a org.aurora.dark
+fi

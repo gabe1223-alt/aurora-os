@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply Aurora CPU governor profile
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/aurora/set-governor
+
+[Install]
+WantedBy=multi-user.target

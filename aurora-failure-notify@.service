@@ -1,0 +1,6 @@
+[Unit]
+Description=Tell desktop users that %i failed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/aurora/failure-notify %i

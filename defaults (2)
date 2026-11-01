@@ -1,0 +1,15 @@
+[kdeglobals][General]
+ColorScheme=BreezeLight
+
+[kdeglobals][KDE]
+widgetStyle=Breeze
+LookAndFeelPackage=org.aurora.light
+
+[kdeglobals][Icons]
+Theme=breeze
+
+[plasmarc][Theme]
+name=breeze-light
+
+[kcminputrc][Mouse]
+cursorTheme=breeze_cursors

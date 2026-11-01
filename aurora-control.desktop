@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Aurora Control
+GenericName=System Management
+Comment=Account, updates, power, memory, storage, backup, logs and recovery
+Icon=aurora-logo
+Exec=aurora-control
+Terminal=false
+Categories=Settings;System;
+Keywords=username;password;updates;power;governor;backup;logs;recovery;storage;memory;zram;

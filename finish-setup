@@ -1,0 +1,12 @@
+#!/bin/bash
+# Started by apply-setup through systemd-run, so it survives the display manager restart.
+sleep 2
+systemctl stop lightdm.service
+loginctl terminate-user aurora-setup 2>/dev/null || true
+pkill -KILL -u aurora-setup 2>/dev/null || true
+sleep 1
+userdel -rf aurora-setup 2>/dev/null || true
+rm -f /etc/lightdm/lightdm.conf.d/60-aurora-firstboot.conf
+mkdir -p /var/lib/aurora
+touch /var/lib/aurora/setup-complete
+systemctl start lightdm.service

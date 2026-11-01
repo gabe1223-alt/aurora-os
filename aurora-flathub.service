@@ -1,0 +1,15 @@
+[Unit]
+Description=Add the Flathub remote (retries until the network is up)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/aurora/flathub-added
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && mkdir -p /var/lib/aurora && touch /var/lib/aurora/flathub-added'
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

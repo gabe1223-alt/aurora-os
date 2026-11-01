@@ -1,0 +1,2 @@
+# Kill the biggest process before the system freezes (4 % RAM / 10 % swap left).
+EARLYOOM_ARGS="-r 3600 -m 4 -s 10"

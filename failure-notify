@@ -1,0 +1,14 @@
+#!/bin/bash
+UNIT="$1"
+case "$UNIT" in
+    aurora-*|user@*|user-runtime-dir@*|systemd-coredump*) exit 0 ;;
+esac
+for uid in $(loginctl list-users --no-legend | awk '{print $1}'); do
+    [ -S "/run/user/$uid/bus" ] || continue
+    name="$(id -nu "$uid")"
+    runuser -u "$name" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+        notify-send -a "Aurora System" -i dialog-warning \
+        "A system service stopped unexpectedly" \
+        "$UNIT failed. Open Aurora Control > Logs & Recovery for details." || true
+done
+exit 0

@@ -1,0 +1,14 @@
+[
+  {"label": "English (United States)", "locale": "en_US.UTF-8", "keyboard": "us", "country": "US", "tz": "America/New_York"},
+  {"label": "English (United Kingdom)", "locale": "en_GB.UTF-8", "keyboard": "gb", "country": "GB", "tz": "Europe/London"},
+  {"label": "Svenska", "locale": "sv_SE.UTF-8", "keyboard": "se", "country": "SE", "tz": "Europe/Stockholm"},
+  {"label": "Deutsch", "locale": "de_DE.UTF-8", "keyboard": "de", "country": "DE", "tz": "Europe/Berlin"},
+  {"label": "Français", "locale": "fr_FR.UTF-8", "keyboard": "fr", "country": "FR", "tz": "Europe/Paris"},
+  {"label": "Español", "locale": "es_ES.UTF-8", "keyboard": "es", "country": "ES", "tz": "Europe/Madrid"},
+  {"label": "Italiano", "locale": "it_IT.UTF-8", "keyboard": "it", "country": "IT", "tz": "Europe/Rome"},
+  {"label": "Português (Brasil)", "locale": "pt_BR.UTF-8", "keyboard": "br", "country": "BR", "tz": "America/Sao_Paulo"},
+  {"label": "Nederlands", "locale": "nl_NL.UTF-8", "keyboard": "us", "country": "NL", "tz": "Europe/Amsterdam"},
+  {"label": "Polski", "locale": "pl_PL.UTF-8", "keyboard": "pl", "country": "PL", "tz": "Europe/Warsaw"},
+  {"label": "Русский", "locale": "ru_RU.UTF-8", "keyboard": "ru", "country": "RU", "tz": "Europe/Moscow"},
+  {"label": "Türkçe", "locale": "tr_TR.UTF-8", "keyboard": "tr", "country": "TR", "tz": "Europe/Istanbul"}
+]

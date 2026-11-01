@@ -1,0 +1,23 @@
+{
+  "policies": {
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DisablePocket": true,
+    "DontCheckDefaultBrowser": true,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "NoDefaultBookmarks": true,
+    "DisplayBookmarksToolbar": "always",
+    "PromptForDownloadLocation": false,
+    "DownloadDirectory": "${home}/Downloads",
+    "Homepage": { "URL": "https://duckduckgo.com", "StartPage": "homepage" },
+    "SearchEngines": { "Default": "DuckDuckGo" },
+    "Bookmarks": [
+      { "Title": "DuckDuckGo", "URL": "https://duckduckgo.com", "Placement": "toolbar" },
+      { "Title": "Wikipedia", "URL": "https://www.wikipedia.org", "Placement": "toolbar" },
+      { "Title": "Debian", "URL": "https://www.debian.org", "Placement": "toolbar" },
+      { "Title": "Raspberry Pi", "URL": "https://www.raspberrypi.com", "Placement": "toolbar" },
+      { "Title": "Flathub apps", "URL": "https://flathub.org", "Placement": "toolbar" }
+    ]
+  }
+}

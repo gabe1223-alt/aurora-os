@@ -1,0 +1,7 @@
+// The throw-away setup account may run the setup helper without a password.
+// The helper itself refuses to run once first-boot setup is complete.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.aurora.setup.apply" && subject.user == "aurora-setup") {
+        return polkit.Result.YES;
+    }
+});

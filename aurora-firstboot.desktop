@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Aurora First-Boot Setup
+Comment=Create your account and configure the system
+Exec=/usr/lib/aurora/firstboot-session
+Type=Application
+NoDisplay=true

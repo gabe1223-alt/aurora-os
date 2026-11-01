@@ -1,0 +1,179 @@
+#!/usr/bin/python3
+"""Root helper for the first-boot wizard (run through pkexec; JSON on stdin).
+
+Creates the real user account, sets locale / keyboard / time zone, stores the
+Wi-Fi connection, pre-configures Timeshift, then hands over to finish-setup,
+which deletes the throw-away "aurora-setup" account and restarts LightDM.
+Refuses to run once setup has been completed.
+"""
+import grp
+import json
+import os
+import pwd
+import re
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
+PENDING = Path("/etc/lightdm/lightdm.conf.d/60-aurora-firstboot.conf")
+LANGS = json.load(open("/usr/share/aurora/languages.json"))
+RESERVED = {"root", "aurora-setup", "daemon", "bin", "sys", "nobody", "admin"}
+WANTED_GROUPS = ("sudo", "adm", "audio", "video", "plugdev", "netdev", "input", "render",
+                 "gpio", "spi", "i2c", "users", "dialout", "cdrom", "lpadmin", "systemd-journal")
+
+
+def die(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def run(*cmd, **kw):
+    return subprocess.run(list(cmd), check=True, capture_output=True, text=True, **kw)
+
+
+def try_run(*cmd, **kw):
+    try:
+        return subprocess.run(list(cmd), capture_output=True, text=True, timeout=90, **kw)
+    except Exception:
+        return None
+
+
+def check_caller():
+    if os.geteuid() != 0:
+        die("This helper must run as root.")
+    uid = os.environ.get("PKEXEC_UID")
+    try:
+        ok = uid is not None and pwd.getpwuid(int(uid)).pw_name == "aurora-setup"
+    except KeyError:
+        ok = False
+    if not ok:
+        die("Not permitted.")
+    if not PENDING.exists():
+        die("Setup has already been completed.")
+
+
+def wifi_prep(country):
+    if not re.fullmatch(r"[A-Z]{2}", country):
+        die("Invalid country code.")
+    try_run("iw", "reg", "set", country)
+    try_run("raspi-config", "nonint", "do_wifi_country", country)
+    try_run("rfkill", "unblock", "wifi")
+
+
+def group_exists(name):
+    try:
+        grp.getgrnam(name)
+        return True
+    except KeyError:
+        return False
+
+
+def write_wifi(ssid, psk, country):
+    wifi_prep(country)
+    if not (1 <= len(ssid.encode()) <= 32) or any(ord(c) < 32 for c in ssid):
+        die("Invalid Wi-Fi name.")
+    if psk and not (8 <= len(psk) <= 63):
+        die("Wi-Fi password must be 8-63 characters.")
+    lines = [
+        "[connection]", f"id={ssid}", f"uuid={uuid.uuid4()}", "type=wifi", "autoconnect=true", "",
+        "[wifi]", "mode=infrastructure", f"ssid={ssid}", "",
+    ]
+    if psk:
+        lines += ["[wifi-security]", "key-mgmt=wpa-psk", f"psk={psk}", ""]
+    lines += ["[ipv4]", "method=auto", "", "[ipv6]", "method=auto", ""]
+    d = Path("/etc/NetworkManager/system-connections")
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"aurora-{uuid.uuid4().hex[:8]}.nmconnection"
+    fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write("\n".join(lines))
+    try_run("nmcli", "connection", "reload")
+    try_run("nmcli", "--wait", "15", "connection", "up", "id", ssid)
+
+
+def configure_timeshift():
+    r = try_run("findmnt", "-no", "UUID", "/")
+    dev = r.stdout.strip() if r else ""
+    if not dev:
+        return
+    cfg = {
+        "backup_device_uuid": dev, "parent_device_uuid": "", "do_first_run": "false",
+        "btrfs_mode": "false", "include_btrfs_home_for_backup": "false",
+        "include_btrfs_home_for_restore": "false", "stop_cron_emails": "true",
+        "schedule_monthly": "false", "schedule_weekly": "false", "schedule_daily": "false",
+        "schedule_hourly": "false", "schedule_boot": "false", "count_monthly": "2",
+        "count_weekly": "3", "count_daily": "5", "count_hourly": "6", "count_boot": "5",
+        "snapshot_size": "0", "snapshot_count": "0", "date_format": "%Y-%m-%d %H:%M:%S",
+        "exclude": [], "exclude-apps": [],
+    }
+    os.makedirs("/etc/timeshift", exist_ok=True)
+    with open("/etc/timeshift/timeshift.json", "w") as fh:
+        json.dump(cfg, fh, indent=2)
+
+
+def main():
+    check_caller()
+    if len(sys.argv) == 3 and sys.argv[1] == "--wifi-prep":
+        wifi_prep(sys.argv[2])
+        return
+
+    data = json.load(sys.stdin)
+    username = str(data.get("username", ""))
+    fullname = str(data.get("fullname", "")).strip() or username
+    password = str(data.get("password", ""))
+    tz = str(data.get("timezone", ""))
+    lang = next((l for l in LANGS if l["locale"] == data.get("locale")), None)
+
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", username) or username in RESERVED:
+        die("Invalid username.")
+    try:
+        pwd.getpwnam(username)
+        die("That username already exists.")
+    except KeyError:
+        pass
+    if group_exists(username):
+        die("That username is already in use as a group name.")
+    if re.search(r"[:,\n\r\\]", fullname):
+        die("The full name contains characters that are not allowed.")
+    if not (8 <= len(password) <= 128) or "\n" in password or "\r" in password:
+        die("Password must be 8-128 characters.")
+    if lang is None:
+        die("Unsupported language.")
+    if not re.fullmatch(r"[A-Za-z0-9_+/-]+", tz) or not os.path.isfile(f"/usr/share/zoneinfo/{tz}"):
+        die("Invalid time zone.")
+
+    # 1. account
+    groups = ",".join(g for g in WANTED_GROUPS if group_exists(g))
+    run("useradd", "-m", "-k", "/etc/skel", "-s", "/bin/bash", "-c", fullname, "-G", groups, username)
+    run("chpasswd", input=f"{username}:{password}\n")
+
+    # 2. locale + keyboard + time zone
+    run("update-locale", f"LANG={lang['locale']}")
+    kb = lang["keyboard"]
+    with open("/etc/default/keyboard", "w") as fh:
+        fh.write(f'XKBMODEL="pc105"\nXKBLAYOUT="{kb}"\nXKBVARIANT=""\nXKBOPTIONS=""\nBACKSPACE="guess"\n')
+    try_run("localectl", "set-x11-keymap", kb, "pc105")
+    r = try_run("timedatectl", "set-timezone", tz)
+    if r is None or r.returncode != 0:
+        run("ln", "-sf", f"/usr/share/zoneinfo/{tz}", "/etc/localtime")
+        Path("/etc/timezone").write_text(tz + "\n")
+    try_run("timedatectl", "set-ntp", "true")
+
+    # 3. Wi-Fi (optional)
+    wifi = data.get("wifi")
+    if wifi and wifi.get("ssid"):
+        country = str(wifi.get("country", lang["country"])).upper()
+        write_wifi(str(wifi["ssid"]), str(wifi.get("psk", "")), country)
+
+    # 4. Timeshift pre-configuration
+    configure_timeshift()
+
+    # 5. hand over: remove autologin, clean up in a detached unit
+    PENDING.unlink()
+    run("systemd-run", "--unit=aurora-finish-setup", "--no-block", "/usr/lib/aurora/finish-setup")
+    print("ok")
+
+
+if __name__ == "__main__":
+    main()

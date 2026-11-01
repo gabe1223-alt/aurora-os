@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply a pending account rename before anyone can log in
+DefaultDependencies=no
+After=local-fs.target systemd-remount-fs.service
+Before=systemd-user-sessions.service display-manager.service
+ConditionPathExists=/var/lib/aurora/pending-rename
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/aurora/apply-rename
+
+[Install]
+WantedBy=multi-user.target

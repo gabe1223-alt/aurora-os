@@ -1,0 +1,322 @@
+#!/usr/bin/python3
+"""Aurora Control: account, updates, power, memory, storage, backup, logs and recovery.
+
+Wallpaper, theme, language, sound, display, network and date/time live in KDE System
+Settings; the buttons below open the matching pages.
+"""
+import os
+import pwd
+import shutil
+import subprocess
+import sys
+
+from PyQt6.QtCore import QProcess, QTimer
+from PyQt6.QtGui import QFontDatabase
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
+                             QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
+                             QPushButton, QTabWidget, QVBoxLayout, QWidget)
+
+HELPER = "/usr/lib/aurora/control-helper"
+USER = pwd.getpwuid(os.getuid()).pw_name
+HOME = os.path.expanduser("~")
+GOVERNORS = [("Balanced (ondemand)", "ondemand"), ("Performance", "performance"),
+             ("Power saver", "powersave"), ("Smooth (schedutil)", "schedutil")]
+
+
+def read(path, default=""):
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except OSError:
+        return default
+
+
+def helper(*args):
+    r = subprocess.run(["pkexec", HELPER, *args], capture_output=True, text=True)
+    return r.returncode == 0, (r.stdout + r.stderr).strip()
+
+
+def launch(*cmd):
+    try:
+        subprocess.Popen(list(cmd), start_new_session=True)
+    except OSError as exc:
+        QMessageBox.warning(None, "Aurora Control", f"Could not start {cmd[0]}: {exc}")
+
+
+def human(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.1f} {unit}" if unit != "B" else f"{int(n)} B"
+        n /= 1024
+
+
+def column(*widgets):
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    for item in widgets:
+        lay.addWidget(item)
+    lay.addStretch(1)
+    return w
+
+
+def button(text, slot):
+    b = QPushButton(text)
+    b.clicked.connect(slot)
+    return b
+
+
+def mono(edit):
+    edit.setReadOnly(True)
+    edit.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+    return edit
+
+
+class Control(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Aurora Control")
+        self.resize(820, 600)
+        tabs = QTabWidget()
+        tabs.addTab(self.tab_account(), "Account")
+        tabs.addTab(self.tab_updates(), "Updates")
+        tabs.addTab(self.tab_power(), "Power")
+        tabs.addTab(self.tab_memory(), "Memory")
+        tabs.addTab(self.tab_storage(), "Storage")
+        tabs.addTab(self.tab_backup(), "Backup")
+        tabs.addTab(self.tab_logs(), "Logs & Recovery")
+        lay = QVBoxLayout(self)
+        lay.addWidget(tabs)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.refresh_live)
+        self.timer.start(2000)
+        self.refresh_live()
+
+    # ---- Account ----
+    def tab_account(self):
+        self.new_user = QLineEdit()
+        self.new_user.setPlaceholderText("new username")
+        box = QGroupBox(f"Signed in as: {USER}")
+        form = QVBoxLayout(box)
+        form.addWidget(QLabel("Change password, display name and picture in KDE System Settings > Users."))
+        form.addWidget(button("Change password / name...", lambda: launch("systemsettings", "kcm_users")))
+        form.addWidget(QLabel("Change login name (applied on the next reboot, before login):"))
+        form.addWidget(self.new_user)
+        form.addWidget(button("Schedule username change", self.rename))
+        other = QGroupBox("Other settings (KDE System Settings)")
+        ol = QVBoxLayout(other)
+        for label, mod in (("Wallpaper", "kcm_wallpaper"), ("Theme (light/dark)", "kcm_lookandfeel"),
+                           ("Language & region", "kcm_regionandlang"), ("Sound", "kcm_pulseaudio"),
+                           ("Display", "kcm_kscreen"), ("Network", "kcm_networkmanagement"),
+                           ("Date & time", "kcm_clock")):
+            ol.addWidget(button(label, lambda _=False, m=mod: launch("systemsettings", m)))
+        ol.addWidget(button("Open all settings", lambda: launch("systemsettings")))
+        return column(box, other)
+
+    def rename(self):
+        new = self.new_user.text().strip()
+        ok, msg = helper("rename-user", new)
+        QMessageBox.information(self, "Rename", msg or ("Scheduled." if ok else "Failed."))
+        if ok and QMessageBox.question(self, "Reboot", "Reboot now to apply the new username?") == \
+                QMessageBox.StandardButton.Yes:
+            subprocess.Popen(["systemctl", "reboot"])
+
+    # ---- Updates ----
+    def tab_updates(self):
+        self.unattended = QCheckBox("Install security updates automatically")
+        self.unattended.setChecked('Unattended-Upgrade "1"' in read("/etc/apt/apt.conf.d/20auto-upgrades"))
+        return column(
+            QLabel("Updates for system packages and Flatpak apps are handled by Discover."),
+            button("Open Software Center > Updates", lambda: launch("plasma-discover", "--mode", "update")),
+            self.unattended,
+            button("Apply automatic-update setting", self.apply_unattended),
+        )
+
+    def apply_unattended(self):
+        ok, msg = helper("unattended", "on" if self.unattended.isChecked() else "off")
+        QMessageBox.information(self, "Updates", "Saved." if ok else f"Failed: {msg}")
+
+    # ---- Power ----
+    def tab_power(self):
+        self.gov = QComboBox()
+        for label, _ in GOVERNORS:
+            self.gov.addItem(label)
+        cur = read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+        for i, (_, g) in enumerate(GOVERNORS):
+            if g == cur:
+                self.gov.setCurrentIndex(i)
+        self.power_info = QLabel("")
+        return column(
+            QLabel("CPU profile:"), self.gov, button("Apply profile (kept after reboot)", self.apply_gov),
+            self.power_info,
+            button("Screen blanking, sleep and battery settings...",
+                   lambda: launch("systemsettings", "kcm_powerdevilprofilesconfig")),
+            button("Energy information", lambda: launch("systemsettings", "kcm_energyinfo")),
+        )
+
+    def apply_gov(self):
+        ok, msg = helper("governor", GOVERNORS[self.gov.currentIndex()][1])
+        QMessageBox.information(self, "Power", "Profile applied." if ok else f"Failed: {msg}")
+
+    # ---- Memory ----
+    def tab_memory(self):
+        self.mem = mono(QPlainTextEdit())
+        return column(self.mem, button("Open System Monitor (processes, CPU, RAM, kill)",
+                                       lambda: launch("plasma-systemmonitor")))
+
+    # ---- Storage ----
+    def tab_storage(self):
+        self.disk_bar = QProgressBar()
+        self.disk_lbl = QLabel("")
+        self.out = mono(QPlainTextEdit())
+        return column(
+            self.disk_lbl, self.disk_bar,
+            button("Clean up (apt cache, old logs, unused Flatpak runtimes)", self.cleanup),
+            button("Empty Trash", self.empty_trash),
+            button("Visualise disk usage (Filelight)", lambda: launch("filelight")),
+            button("Partition manager (GParted)", lambda: launch("gparted")),
+            self.out,
+        )
+
+    def cleanup(self):
+        self.out.setPlainText("Cleaning...")
+        QApplication.processEvents()
+        ok, msg = helper("cleanup")
+        self.out.setPlainText(msg or ("Done." if ok else "Failed."))
+
+    def empty_trash(self):
+        base = os.path.join(HOME, ".local/share/Trash")
+        for sub in ("files", "info"):
+            shutil.rmtree(os.path.join(base, sub), ignore_errors=True)
+            os.makedirs(os.path.join(base, sub), exist_ok=True)
+        self.out.setPlainText("Trash emptied.")
+
+    # ---- Backup ----
+    def tab_backup(self):
+        self.dest = QLineEdit()
+        self.dest.setPlaceholderText("Backup folder (for example on a USB drive)")
+        self.log = mono(QPlainTextEdit())
+        self.proc = None
+        row = QHBoxLayout()
+        row.addWidget(self.dest, 1)
+        row.addWidget(button("Browse...", self.pick))
+        holder = QWidget()
+        holder.setLayout(row)
+        return column(
+            QLabel("System snapshots (Timeshift):"),
+            button("Open Timeshift", lambda: launch("timeshift-launcher")),
+            QLabel("Personal files (your home folder):"), holder,
+            button("Back up my files now", self.backup),
+            button("Restore my files from this backup", self.restore),
+            self.log,
+        )
+
+    def pick(self):
+        d = QFileDialog.getExistingDirectory(self, "Choose backup folder")
+        if d:
+            self.dest.setText(d)
+
+    def _rsync(self, src, dst, delete):
+        if self.proc is not None and self.proc.state() != QProcess.ProcessState.NotRunning:
+            return
+        args = ["-aH", "--info=progress2", "--human-readable",
+                "--exclude=.cache/", "--exclude=.local/share/Trash/"]
+        if delete:
+            args.append("--delete")
+        self.log.clear()
+        self.proc = QProcess(self)
+        self.proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        self.proc.readyRead.connect(lambda: self.log.appendPlainText(
+            bytes(self.proc.readAll()).decode(errors="replace").strip()))
+        self.proc.finished.connect(lambda code, _s: self.log.appendPlainText(
+            "Finished." if code == 0 else f"rsync exited with code {code}."))
+        self.proc.start("rsync", args + [src, dst])
+
+    def _target(self):
+        d = self.dest.text().strip()
+        if not d or not os.path.isdir(d):
+            QMessageBox.warning(self, "Backup", "Choose an existing backup folder first.")
+            return None
+        return os.path.join(d, f"aurora-backup-{USER}")
+
+    def backup(self):
+        t = self._target()
+        if t:
+            os.makedirs(t, exist_ok=True)
+            self._rsync(HOME + "/", t + "/", True)
+
+    def restore(self):
+        t = self._target()
+        if t and os.path.isdir(t) and QMessageBox.question(
+                self, "Restore", "Copy files from the backup into your home folder?\n"
+                "Existing files with the same name are overwritten.") == QMessageBox.StandardButton.Yes:
+            self._rsync(t + "/", HOME + "/", False)
+
+    # ---- Logs & recovery ----
+    def tab_logs(self):
+        self.filter = QComboBox()
+        self.filter.addItems(["Warnings and errors (this boot)", "Everything (this boot)",
+                              "Errors (previous boot)", "Failed services"])
+        self.logview = mono(QPlainTextEdit())
+        self.filter.currentIndexChanged.connect(self.load_logs)
+        self.load_logs()
+        return column(
+            self.filter, self.logview, button("Refresh", self.load_logs),
+            button("Reboot into Recovery Mode (one time)", self.recovery),
+        )
+
+    def load_logs(self):
+        cmds = [["journalctl", "--no-pager", "-n", "400", "-p", "warning", "-b"],
+                ["journalctl", "--no-pager", "-n", "400", "-b"],
+                ["journalctl", "--no-pager", "-n", "400", "-p", "err", "-b", "-1"],
+                ["systemctl", "--failed", "--no-pager"]]
+        try:
+            r = subprocess.run(cmds[self.filter.currentIndex()], capture_output=True, text=True, timeout=30)
+            self.logview.setPlainText((r.stdout + r.stderr) or "(nothing to show)")
+        except (subprocess.SubprocessError, OSError) as exc:
+            self.logview.setPlainText(f"Could not read the journal: {exc}")
+
+    def recovery(self):
+        if QMessageBox.question(self, "Recovery Mode", "Restart now into the recovery menu?\n"
+                                "The next restart after that boots normally.") != QMessageBox.StandardButton.Yes:
+            return
+        ok, msg = helper("recovery-reboot")
+        if not ok:
+            QMessageBox.warning(self, "Recovery Mode", msg or "Could not start recovery mode.")
+
+    # ---- live data ----
+    def refresh_live(self):
+        info = {}
+        for line in read("/proc/meminfo").splitlines():
+            k, _, v = line.partition(":")
+            info[k] = int(v.split()[0]) * 1024 if v.split() else 0
+        total, avail = info.get("MemTotal", 0), info.get("MemAvailable", 0)
+        swap_t, swap_f = info.get("SwapTotal", 0), info.get("SwapFree", 0)
+        zram = read("/sys/block/zram0/disksize", "0")
+        self.mem.setPlainText(
+            f"RAM total:      {human(total)}\nRAM used:       {human(total - avail)}\n"
+            f"RAM available:  {human(avail)}\n\nSwap total:     {human(swap_t)}\n"
+            f"Swap used:      {human(swap_t - swap_f)}\n"
+            f"zram size:      {human(int(zram))}  ({'active' if int(zram) else 'not active'})\n"
+            f"swappiness:     {read('/proc/sys/vm/swappiness')}\n\n/proc/swaps:\n{read('/proc/swaps')}")
+        u = shutil.disk_usage("/")
+        self.disk_bar.setValue(int(u.used * 100 / u.total))
+        self.disk_lbl.setText(f"Root filesystem: {human(u.used)} used of {human(u.total)} ({human(u.free)} free)")
+        bats = [d for d in os.listdir("/sys/class/power_supply") if d.startswith("BAT")] \
+            if os.path.isdir("/sys/class/power_supply") else []
+        gov = read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "unknown")
+        freq = read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+        mhz = f"{int(freq) // 1000} MHz" if freq.isdigit() else "n/a"
+        batt = "Battery: " + ", ".join(f"{b} {read(f'/sys/class/power_supply/{b}/capacity')}%" for b in bats) \
+            if bats else "No battery detected (mains-powered Raspberry Pi)."
+        self.power_info.setText(f"Current governor: {gov}   CPU: {mhz}\n{batt}")
+
+
+def main():
+    app = QApplication(sys.argv)
+    w = Control()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,9 @@
+{
+  "KPlugin": {
+    "Authors": [{ "Name": "Aurora OS" }],
+    "Id": "AuroraNight",
+    "Name": "Aurora Night",
+    "License": "CC-BY-SA-4.0"
+  },
+  "KPackageStructure": "Wallpaper/Images"
+}

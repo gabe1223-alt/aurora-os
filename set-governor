@@ -1,0 +1,9 @@
+#!/bin/sh
+GOV="$(cat /etc/aurora/cpu-governor 2>/dev/null || echo ondemand)"
+for d in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do
+    [ -w "$d/scaling_governor" ] || continue
+    if grep -qw "$GOV" "$d/scaling_available_governors" 2>/dev/null; then
+        echo "$GOV" > "$d/scaling_governor"
+    fi
+done
+exit 0

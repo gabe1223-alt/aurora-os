@@ -1,0 +1,257 @@
+#!/usr/bin/python3
+"""Aurora first-boot wizard: language, account, Wi-Fi, time zone."""
+import json
+import re
+import subprocess
+import sys
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel,
+                             QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWizard, QWizardPage)
+
+HELPER = "/usr/lib/aurora/apply-setup"
+LANGS = json.load(open("/usr/share/aurora/languages.json"))
+USER_RE = re.compile(r"^[a-z][a-z0-9_-]{0,30}$")
+RESERVED = {"root", "admin", "aurora-setup", "daemon", "bin", "sys", "nobody"}
+
+STYLE = """
+QWidget { background: #0f1424; color: #e8ecf8; font-size: 15px; }
+QLineEdit, QComboBox { background: #1a2138; border: 1px solid #33406b; border-radius: 6px; padding: 8px; }
+QComboBox QAbstractItemView { background: #1a2138; selection-background-color: #4f6cff; }
+QPushButton { background: #4f6cff; color: white; border: none; border-radius: 6px; padding: 8px 18px; }
+QPushButton:disabled { background: #2a3150; color: #7b86a8; }
+QLabel#warn { color: #ffb86b; }
+"""
+
+
+class LanguagePage(QWizardPage):
+    def __init__(self):
+        super().__init__()
+        self.setTitle("Welcome to Aurora")
+        self.setSubTitle("Choose your language. This also selects your keyboard layout.")
+        self.combo = QComboBox()
+        for lang in LANGS:
+            self.combo.addItem(lang["label"])
+        lay = QVBoxLayout(self)
+        lay.addWidget(self.combo)
+
+    def current(self):
+        return LANGS[self.combo.currentIndex()]
+
+
+class AccountPage(QWizardPage):
+    def __init__(self):
+        super().__init__()
+        self.setTitle("Create your account")
+        self.setSubTitle("There is no default password: this account is the only one on the system.")
+        self._user_edited = False
+        self.full = QLineEdit()
+        self.user = QLineEdit()
+        self.pw1 = QLineEdit()
+        self.pw2 = QLineEdit()
+        for w in (self.pw1, self.pw2):
+            w.setEchoMode(QLineEdit.EchoMode.Password)
+        self.msg = QLabel("")
+        self.msg.setObjectName("warn")
+        form = QFormLayout(self)
+        form.addRow("Your name", self.full)
+        form.addRow("Username", self.user)
+        form.addRow("Password", self.pw1)
+        form.addRow("Repeat password", self.pw2)
+        form.addRow("", self.msg)
+        self.full.textChanged.connect(self._suggest)
+        self.user.textEdited.connect(self._mark_edited)
+        for w in (self.full, self.user, self.pw1, self.pw2):
+            w.textChanged.connect(self.completeChanged)
+
+    def _mark_edited(self, _text):
+        self._user_edited = True
+
+    def _suggest(self, text):
+        if not self._user_edited:
+            first = (text.strip().split() or [""])[0].lower()
+            self.user.setText(re.sub(r"[^a-z0-9_-]", "", first))
+
+    def isComplete(self):
+        u, p1, p2 = self.user.text(), self.pw1.text(), self.pw2.text()
+        problem = ""
+        if not USER_RE.match(u) or u in RESERVED:
+            problem = "Username: lowercase letters, digits, - and _, starting with a letter."
+        elif len(p1) < 8:
+            problem = "The password needs at least 8 characters."
+        elif p1 != p2:
+            problem = "The passwords do not match."
+        self.msg.setText(problem)
+        return not problem
+
+
+class NetworkPage(QWizardPage):
+    def __init__(self):
+        super().__init__()
+        self.setTitle("Wi-Fi")
+        self.setSubTitle("Optional. Ethernet works automatically. You can change this later in the tray.")
+        self.skip = QCheckBox("Skip Wi-Fi for now")
+        self.country = QLineEdit()
+        self.country.setMaxLength(2)
+        self.ssid = QComboBox()
+        self.ssid.setEditable(True)
+        self.scan_btn = QPushButton("Scan for networks")
+        self.psk = QLineEdit()
+        self.psk.setEchoMode(QLineEdit.EchoMode.Password)
+        self.status = QLabel("")
+        row = QHBoxLayout()
+        row.addWidget(self.ssid, 1)
+        row.addWidget(self.scan_btn)
+        form = QFormLayout(self)
+        form.addRow(self.skip)
+        form.addRow("Country code (2 letters)", self.country)
+        form.addRow("Network name", row)
+        form.addRow("Wi-Fi password", self.psk)
+        form.addRow("", self.status)
+        self.scan_btn.clicked.connect(self.scan)
+        self.skip.toggled.connect(self._toggle)
+        self.skip.setChecked(False)
+
+    def _toggle(self, skipped):
+        for w in (self.country, self.ssid, self.scan_btn, self.psk):
+            w.setEnabled(not skipped)
+
+    def initializePage(self):
+        self.country.setText(self.wizard().page_lang.current()["country"])
+
+    def scan(self):
+        cc = self.country.text().strip().upper()
+        if not re.fullmatch(r"[A-Z]{2}", cc):
+            self.status.setText("Enter a two-letter country code first (for example SE or US).")
+            return
+        self.status.setText("Scanning...")
+        QApplication.processEvents()
+        try:
+            subprocess.run(["pkexec", HELPER, "--wifi-prep", cc], capture_output=True, timeout=40)
+            out = subprocess.run(["nmcli", "-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "yes"],
+                                 capture_output=True, text=True, timeout=40).stdout
+        except (subprocess.SubprocessError, OSError):
+            self.status.setText("Scan failed. You can type the network name manually.")
+            return
+        names = sorted({line.replace("\\:", ":") for line in out.splitlines() if line.strip()})
+        self.ssid.clear()
+        self.ssid.addItems(names)
+        self.status.setText(f"Found {len(names)} network(s)." if names else "No networks found. Type the name manually.")
+
+    def data(self):
+        if self.skip.isChecked() or not self.ssid.currentText().strip():
+            return None
+        return {"ssid": self.ssid.currentText().strip(), "psk": self.psk.text(),
+                "country": self.country.text().strip().upper() or "US"}
+
+
+class TimePage(QWizardPage):
+    def __init__(self):
+        super().__init__()
+        self.setTitle("Time zone")
+        self.setSubTitle("Where are you? Date and time are kept in sync automatically.")
+        self.combo = QComboBox()
+        self.combo.setEditable(False)
+        lay = QVBoxLayout(self)
+        lay.addWidget(self.combo)
+
+    def initializePage(self):
+        if self.combo.count() == 0:
+            zones = []
+            try:
+                zones = subprocess.run(["timedatectl", "list-timezones"], capture_output=True,
+                                       text=True, timeout=20).stdout.split()
+            except (subprocess.SubprocessError, OSError):
+                pass
+            if not zones:
+                try:
+                    with open("/usr/share/zoneinfo/zone1970.tab") as fh:
+                        zones = sorted(l.split("\t")[2] for l in fh if l.strip() and not l.startswith("#"))
+                except OSError:
+                    zones = ["Etc/UTC"]
+            self.combo.addItems(zones)
+        idx = self.combo.findText(self.wizard().page_lang.current()["tz"])
+        if idx >= 0:
+            self.combo.setCurrentIndex(idx)
+
+
+class SummaryPage(QWizardPage):
+    def __init__(self):
+        super().__init__()
+        self.setTitle("Ready")
+        self.setSubTitle("Press Finish to create your account. The login screen appears in a few seconds.")
+        self.label = QLabel("")
+        self.label.setWordWrap(True)
+        lay = QVBoxLayout(self)
+        lay.addWidget(self.label)
+
+    def initializePage(self):
+        d = self.wizard().collect()
+        wifi = d["wifi"]["ssid"] if d["wifi"] else "skipped"
+        self.label.setText(f"Language: {d['language']}\nUsername: {d['username']}\n"
+                           f"Time zone: {d['timezone']}\nWi-Fi: {wifi}")
+
+
+class Wizard(QWizard):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Aurora Setup")
+        self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
+        self.setOption(QWizard.WizardOption.NoCancelButton, True)
+        logo = QPixmap("/usr/share/aurora/logo.png")
+        if not logo.isNull():
+            self.setPixmap(QWizard.WizardPixmap.LogoPixmap,
+                           logo.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio,
+                                       Qt.TransformationMode.SmoothTransformation))
+        self.page_lang = LanguagePage()
+        self.page_acct = AccountPage()
+        self.page_net = NetworkPage()
+        self.page_time = TimePage()
+        self.page_sum = SummaryPage()
+        for p in (self.page_lang, self.page_acct, self.page_net, self.page_time, self.page_sum):
+            self.addPage(p)
+        self.setButtonText(QWizard.WizardButton.FinishButton, "Finish")
+
+    def collect(self):
+        lang = self.page_lang.current()
+        return {
+            "language": lang["label"],
+            "locale": lang["locale"],
+            "fullname": self.page_acct.full.text().strip(),
+            "username": self.page_acct.user.text(),
+            "password": self.page_acct.pw1.text(),
+            "timezone": self.page_time.combo.currentText(),
+            "wifi": self.page_net.data(),
+        }
+
+    def accept(self):
+        payload = self.collect()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            r = subprocess.run(["pkexec", HELPER], input=json.dumps(payload), text=True,
+                               capture_output=True, timeout=300)
+        except (subprocess.SubprocessError, OSError) as exc:
+            r = None
+            err = str(exc)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if r is None or r.returncode != 0:
+            msg = err if r is None else (r.stderr or r.stdout or "Unknown error")
+            QMessageBox.critical(self, "Setup failed", msg.strip()[-800:])
+            return
+        super().accept()
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(STYLE)
+    w = Wizard()
+    w.setWindowState(Qt.WindowState.WindowMaximized)
+    w.exec()
+    sys.exit(0 if w.result() == 1 else 1)
+
+
+if __name__ == "__main__":
+    main()

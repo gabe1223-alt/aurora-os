@@ -1,0 +1,12 @@
+{
+  "KPlugin": {
+    "Authors": [{ "Name": "Aurora OS" }],
+    "Id": "org.aurora.dark",
+    "Name": "Aurora Dark",
+    "Description": "Aurora Dark global theme for Aurora OS",
+    "License": "GPL-3.0+",
+    "Version": "1.0",
+    "Website": ""
+  },
+  "KPackageStructure": "Plasma/LookAndFeel"
+}

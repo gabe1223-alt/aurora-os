@@ -1,0 +1,7 @@
+#!/bin/sh
+# X session used only for the automatic first-boot login of "aurora-setup".
+export XDG_CURRENT_DESKTOP=KDE
+export QT_QPA_PLATFORM=xcb
+export KWIN_COMPOSE=N
+xsetroot -solid '#0b1020' 2>/dev/null || true
+exec dbus-run-session -- /usr/lib/aurora/firstboot-inner

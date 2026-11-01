@@ -1,0 +1,19 @@
+#!/bin/bash
+# Runs at boot, before any login, when /var/lib/aurora/pending-rename exists ("old new").
+P=/var/lib/aurora/pending-rename
+read -r OLD NEW < "$P" || exit 0
+rm -f "$P"
+RE='^[a-z][a-z0-9_-]{0,30}$'
+[[ "$OLD" =~ $RE && "$NEW" =~ $RE ]] || { logger -t aurora-rename "invalid names"; exit 0; }
+id "$OLD" >/dev/null 2>&1 || exit 0
+id "$NEW" >/dev/null 2>&1 && { logger -t aurora-rename "$NEW already exists"; exit 0; }
+if usermod -l "$NEW" -d "/home/$NEW" -m "$OLD"; then
+    getent group "$OLD" >/dev/null && groupmod -n "$NEW" "$OLD"
+    [ -f "/var/lib/AccountsService/users/$OLD" ] && \
+        mv "/var/lib/AccountsService/users/$OLD" "/var/lib/AccountsService/users/$NEW"
+    grep -rIl --null "/home/$OLD" "/home/$NEW/.config" "/home/$NEW/.local/share" 2>/dev/null | \
+        xargs -0 -r sed -i "s#/home/$OLD#/home/$NEW#g"
+    logger -t aurora-rename "renamed $OLD to $NEW"
+else
+    logger -t aurora-rename "usermod failed for $OLD"
+fi

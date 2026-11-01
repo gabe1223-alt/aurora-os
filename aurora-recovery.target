@@ -1,0 +1,7 @@
+[Unit]
+Description=Aurora Recovery Mode
+Requires=basic.target
+Wants=aurora-recovery.service
+After=basic.target rescue.service rescue.target
+Conflicts=rescue.service rescue.target display-manager.service
+AllowIsolate=yes

@@ -1,0 +1,8 @@
+[Basic Settings]
+Indexing-Enabled=true
+
+[General]
+dbVersion=2
+only basic indexing=true
+exclude filters=*~,*.part,*.o,*.la,*.lo,*.moc,moc_*.cpp,*.tmp,node_modules,.git,__pycache__
+exclude folders[$e]=$HOME/.cache/,$HOME/.local/share/Trash/,$HOME/.var/,$HOME/.mozilla/

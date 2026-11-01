@@ -1,0 +1,58 @@
+#!/bin/bash
+# Aurora recovery menu. Started on tty1 by aurora-recovery.target
+# (reached via "Reboot into Recovery Mode" or the [tryboot] cmdline).
+export TERM="${TERM:-linux}"
+mount -o remount,rw / 2>/dev/null
+
+list_users() { awk -F: '$3>=1000 && $3<60000 {print $1}' /etc/passwd; }
+
+pick_user() {
+    local args=() u
+    for u in $(list_users); do args+=("$u" ""); done
+    [ ${#args[@]} -eq 0 ] && { whiptail --msgbox "No regular users found." 8 40; return 1; }
+    whiptail --title "Choose user" --menu "User:" 16 50 8 "${args[@]}" 3>&1 1>&2 2>&3
+}
+
+while true; do
+    C=$(whiptail --title "Aurora Recovery" --menu "Your files are not touched unless you say so." 21 74 9 \
+        1 "Reset a user's desktop settings (keeps all files)" \
+        2 "Reset a user's password" \
+        3 "Restore a Timeshift system snapshot" \
+        4 "Repair packages (dpkg / apt)" \
+        5 "Show recent errors" \
+        6 "Re-run first-boot setup (creates a new account)" \
+        7 "Open a root shell" \
+        8 "Reboot normally" 3>&1 1>&2 2>&3) || continue
+
+    case "$C" in
+    1)  u=$(pick_user) || continue
+        h=$(getent passwd "$u" | cut -d: -f6)
+        if whiptail --yesno "Move $h/.config aside and restore defaults for $u?" 9 60; then
+            mv "$h/.config" "$h/.config.broken-$(date +%s)" 2>/dev/null
+            cp -an /etc/skel/. "$h/"
+            chown -R "$u:$(id -gn "$u")" "$h"
+            whiptail --msgbox "Done. Your old settings are in $h/.config.broken-*" 9 60
+        fi ;;
+    2)  u=$(pick_user) || continue
+        clear; passwd "$u"; read -rp "Press Enter..." _ ;;
+    3)  clear; timeshift --list; read -rp "Snapshot name to restore (empty = cancel): " s
+        [ -n "$s" ] && timeshift --restore --snapshot "$s" --skip-grub --yes
+        read -rp "Press Enter..." _ ;;
+    4)  clear; dpkg --configure -a; apt-get -f install -y; read -rp "Press Enter..." _ ;;
+    5)  journalctl -p err -b --no-pager | tail -n 300 > /tmp/aurora-errors.txt
+        whiptail --scrolltext --title "Recent errors (this boot)" --textbox /tmp/aurora-errors.txt 22 78 ;;
+    6)  if whiptail --yesno "Create a fresh setup account and run the first-boot wizard on next boot?" 9 64; then
+            id aurora-setup >/dev/null 2>&1 || useradd -m -s /bin/bash aurora-setup
+            passwd -l aurora-setup >/dev/null
+            cat > /etc/lightdm/lightdm.conf.d/60-aurora-firstboot.conf <<'EOF'
+[Seat:*]
+autologin-user=aurora-setup
+autologin-user-timeout=0
+autologin-session=aurora-firstboot
+EOF
+            whiptail --msgbox "Done. Choose 'Reboot normally' now." 8 50
+        fi ;;
+    7)  clear; echo "Root shell. Type 'exit' to return to the menu."; /bin/bash -l ;;
+    8)  systemctl reboot ;;
+    esac
+done
