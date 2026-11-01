@@ -18,7 +18,7 @@ jobs:
           df -h /
 
       - name: Build image
-        run: ./build.sh
+        run: bash ./build.sh
 
       - name: Upload image
         uses: actions/upload-artifact@v4
